@@ -1,94 +1,50 @@
 import streamlit as st
-import tensorflow as tf
-import pandas as pd
-import numpy as np
-import os
-import random
 from PIL import Image
+import numpy as np
+import torch
+import torchvision.transforms as transforms
+import onnxruntime as ort
 import matplotlib.pyplot as plt
 
-# Constants
-CLASS_NAMES = ['Cargo', 'Military', 'Carrier', 'Cruise', 'Tankers']
-IMG_SIZE = (224, 224)
-CSV_PATH = "/kaggle/input/game-of-deep-learning-ship-datasets/train/train.csv"
-IMG_DIR = "/kaggle/input/game-of-deep-learning-ship-datasets/train/images"
-SAMPLE_COUNT = 50
+class_names = ['Cargo', 'Military', 'Carrier', 'Cruise', 'Tankers']
 
-# Load model
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225])
+])
+
 @st.cache_resource
 def load_model():
-    return tf.keras.models.load_model("ship_classifier.h5")
+    return ort.InferenceSession("ship_classifier.onnx")
 
-model = load_model()
+session = load_model()
 
-# Load and filter data
-@st.cache_data
-def load_data():
-    df = pd.read_csv(CSV_PATH)
-    valid_labels = {0, 1, 2, 3, 4}
-    df = df[df['category'].isin(valid_labels)]
-    label_map = {0: 'Cargo', 1: 'Military', 2: 'Carrier', 3: 'Cruise', 4: 'Tankers'}
-    df['category'] = df['category'].map(label_map)
-    return df
+st.title("Ship Classification with Deep Learning 🚢")
+st.write("Upload a ship image and get the predicted category.")
 
-df = load_data()
+uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "png", "jpeg"])
 
-# Random sample
-random.seed(42)
-sample_df = df.sample(n=SAMPLE_COUNT).reset_index(drop=True)
+if uploaded_file:
+    image = Image.open(uploaded_file).convert("RGB")
+    st.image(image, caption="Uploaded Image", use_container_width=True)
+    
+    img_tensor = transform(image).unsqueeze(0).numpy()  
 
-# Preprocessing function
-def load_and_preprocess_image(image_path):
-    img = Image.open(image_path).convert("RGB").resize(IMG_SIZE)
-    return np.array(img) / 255.0
+    input_name = session.get_inputs()[0].name
+    output_name = session.get_outputs()[0].name
+    result = session.run([output_name], {input_name: img_tensor})[0]
 
-# Load images and true labels
-images = []
-true_labels = []
+    probs = torch.nn.functional.softmax(torch.tensor(result[0]), dim=0).numpy()
+    pred_index = np.argmax(probs)
+    pred_class = class_names[pred_index]
 
-for _, row in sample_df.iterrows():
-    image_path = os.path.join(IMG_DIR, row['image'])
-    img_array = load_and_preprocess_image(image_path)
-    images.append(img_array)
-    true_labels.append(row['category'])
-
-images = np.array(images)
-true_labels = np.array(true_labels)
-
-# Predict
-pred_probs = model.predict(images)
-pred_labels = [CLASS_NAMES[np.argmax(p)] for p in pred_probs]
-
-# Accuracy
-accuracy = np.mean(pred_labels == true_labels)
-
-# Streamlit UI
-st.title("Ship Classifier – Evaluation on 50 Samples")
-st.write(f"✅ **Accuracy:** `{accuracy * 100:.2f}%`")
-
-# Bar Chart: Class Distribution
-fig, ax = plt.subplots()
-true_counts = [np.sum(true_labels == c) for c in CLASS_NAMES]
-pred_counts = [pred_labels.count(c) for c in CLASS_NAMES]
-
-x = np.arange(len(CLASS_NAMES))
-ax.bar(x - 0.2, true_counts, width=0.4, label="True")
-ax.bar(x + 0.2, pred_counts, width=0.4, label="Predicted")
-ax.set_xticks(x)
-ax.set_xticklabels(CLASS_NAMES, rotation=45)
-ax.set_ylabel("Count")
-ax.set_title("True vs Predicted Class Counts")
-ax.legend()
-st.pyplot(fig)
-
-# Display images and predictions
-st.subheader("🔍 Predictions on Random Images")
-for i in range(0, SAMPLE_COUNT, 5):
-    cols = st.columns(5)
-    for j, col in enumerate(cols):
-        index = i + j
-        img = (images[index] * 255).astype(np.uint8)
-        true = true_labels[index]
-        pred = pred_labels[index]
-        caption = f"T: {true} | P: {pred}"
-        col.image(img, use_container_width=True, caption=caption)
+    st.write(f"### Predicted Class: **{pred_class}**")
+    
+    fig, ax = plt.subplots()
+    ax.barh(class_names, probs, color='skyblue')
+    ax.set_xlim(0, 1)
+    ax.set_xlabel("Confidence")
+    ax.invert_yaxis()
+    st.pyplot(fig)
