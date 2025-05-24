@@ -65,7 +65,8 @@ st.markdown(
 st.markdown("<h1 style='text-align: center; margin-bottom: 10px;'>Vessel Classification</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center; margin-bottom: 5px;'>Upload a image of a vessel and get the predicted category.</p>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center; color: #666666; margin-bottom: 30px;'>[Cargo, Military, Carrier, Cruise, Tankers]</p>", unsafe_allow_html=True)
-
+image_path = "ship.jpg"
+st.image(image_path)
 # File uploader with custom styling
 uploaded_file = st.file_uploader(
     "Choose an image...",
